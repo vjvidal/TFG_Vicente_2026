@@ -20,7 +20,7 @@ Diseñar e implementar un minijuego endless runner 3D en el que el jugador corre
 ```
 TFG_Vicente_2026/
 ├── UnityProject/       
-├    ├── TFG_Vicente_2026_v6.4/     # Proyecto Unity
+|   ├── TFG_Vicente_2026_v6.4/     # Proyecto Unity
 └── Memoria/
     ├── capitulos/      # Capítulos de la memoria en LaTeX / Word
     └── imagenes/       # Imágenes y capturas para la memoria
