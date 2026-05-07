@@ -1,14 +1,14 @@
 # Unity generated folders
-Library/
-Temp/
-Obj/
-Build/
-Builds/
-Logs/
-UserSettings/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/Library/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/Temp/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/Obj/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/Build/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/Builds/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/Logs/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/UserSettings/
 
 # Samples from Splines package
-Assets/Samples/
+TFG_Vicente_2026/UnityProject/TFG_Vicente_2026_v6.4/Assets/Samples/
 
 # IDE folders
 .vs/
