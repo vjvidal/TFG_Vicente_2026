@@ -7,6 +7,9 @@ Builds/
 Logs/
 UserSettings/
 
+# Samples from Splines package
+Assets/Samples/
+
 # IDE folders
 .vs/
 .idea/

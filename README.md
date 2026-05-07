@@ -22,8 +22,8 @@ TFG_Vicente_2026/
 ├── UnityProject/       
 |   ├── TFG_Vicente_2026_v6.4/     # Proyecto Unity
 └── Memoria/
-    ├── capitulos/      # Capítulos de la memoria en LaTeX / Word
-    └── imagenes/       # Imágenes y capturas para la memoria
+    ├── capitulos/      # Capítulos de la memoria en LaTeX TODO
+    └── imagenes/       # Imágenes y capturas para la memoria TODO
 ```
 
 ## Autor
