@@ -1,116 +1,136 @@
-using System.Collections.Generic;
+using Unity.Mathematics;
 using UnityEngine;
+using UnityEngine.Splines;
 
 /// <summary>
-/// Manages the procedurally generated infinite track. Generates new chunks and delete the old ones.
+/// Generates one finite procedural road spline when the scene starts.
+/// The spline remains flat on Y = 0 and is rendered with Unity's SplineExtrude component.
 /// </summary>
-/// <remarks>
-/// <para>
-/// Maintains a limited size queue of active <see cref="ProceduralSplineGenerator"/> chunks.
-/// Each frame it checks if old chunks should be destroyed (those far behind the player)
-/// and if new chunks need to be spawned.
-/// </para>
-/// <para>
-/// All chunk shape parameters (<c>knotCount</c>, <c>knotSpacing</c>, <c>maxLateralOffset</c>)
-/// are defined in this script and injected into each chunk via <see cref="ProceduralSplineGenerator.Configure"/>
-/// so they can be tuned in a single Inspector location.
-/// </para>
-/// </remarks>
+[RequireComponent(typeof(SplineContainer))]
+[RequireComponent(typeof(SplineExtrude))]
+[RequireComponent(typeof(MeshFilter))]
+[RequireComponent(typeof(MeshRenderer))]
+[RequireComponent(typeof(MeshCollider))]
 public class TrackManager : MonoBehaviour {
-    [Header("References")]
-    [Tooltip("Chunk prefab with ProceduralSplineGenerator")]
-    [SerializeField] private ProceduralSplineGenerator chunkPrefab;
+    private const float RoadProfileWidthMultiplier = 1.2f;
 
-    [Tooltip("Player transform TODO")]
-    [SerializeField] private Transform player;
+    // Spline configuration
+    [Header("Spline Configuration")]
+    [Tooltip("Approximate total track length.")]
+    [SerializeField, Min(1f)] private float trackLength = 120f;
 
-    [Header("Track Settings")]
-    [Tooltip("How many chunks are kept active simultaneously")]
-    [SerializeField] private int maxActiveChunks = 4;
+    [Tooltip("Distance between consecutive spline knots.")]
+    [SerializeField, Min(0.1f)] private float knotSpacing = 8f;
 
-    [Tooltip("Distance behind the player where a chunk is destroyed")]
-    [SerializeField] private float destroyBehindDistance = 20f;
+    [Tooltip("Maximum lateral change between consecutive knots.")]
+    [SerializeField, Min(0f)] private float maxLateralStep = 4f;
 
-    [Header("Chunk Information")]
-    [Tooltip("Number of Bezier knots per chunk")]
-    [SerializeField] private int knotCount = 6;
+    [Tooltip("Maximum absolute lateral offset from the track center.")]
+    [SerializeField, Min(0f)] private float maxLateralOffset = 15f;
 
-    [Tooltip("Distance between consecutive knots")]
-    [SerializeField] private float knotSpacing = 10f;
+    // Road mesh configuration
+    [Header("Road Mesh")]
+    [Tooltip("Approximate visual road width.")]
+    [SerializeField, Min(0.1f)] private float roadWidth = 4f;
 
-    [Tooltip("Maximum random lateral offset between knots")]
-    [SerializeField] private float maxLateralOffset = 4f;
+    [Tooltip("SplineExtrude mesh resolution. Higher values create smoother curves.")]
+    [SerializeField, Min(0.01f)] private float segmentsPerUnit = 4f;
 
-    /// <summary>Queue of active chunks. Front = oldest, back = newest.</summary>
-    private Queue<ProceduralSplineGenerator> activeChunks = new Queue<ProceduralSplineGenerator>();
+    private SplineContainer splineContainer;
+    private SplineExtrude splineExtrude;
+    private float generatedLength;
 
-    /// <summary>World-space start position for the next chunk to be spawned.</summary>
-    private Vector3 nextChunkStartPos = Vector3.zero;
+    // Check if it's the final of the Spline on other classes 
+    public float TrackLength => generatedLength;
 
-    /// <summary>
-    /// Incoming travel direction passed to the next spawned chunk to ensure
-    /// a smooth spline junction. Initialised to <see cref="Vector3.forward"/>
-    /// so the first chunk goes straight.
-    /// </summary>
-    private Vector3 nextChunkDirection = Vector3.forward;
+    private void InitComponents(){
+        splineContainer = GetComponent<SplineContainer>();
+        splineExtrude = GetComponent<SplineExtrude>();
+    }
 
-    /// <summary>
-    /// Spawns the initial set of chunks at game start.
-    /// </summary>
+    private void Awake() {
+        InitComponents();
+        ConfigureExtrude();
+    }
+
     private void Start() {
-        for (int i = 0; i < maxActiveChunks; i++) {
-            SpawnNextChunk();
-        }
+        GenerateTrack();
     }
 
     /// <summary>
-    /// Every frame: destroys chunks that are too far behind the player and
-    /// spawns new ones at the front if the queue has less than <c>maxActiveChunks</c>.
+    /// Build the Spline and extrude it using Spline Extrude
     /// </summary>
-    private void Update() {
-        if (player == null) return;
+    public void GenerateTrack() {
+        Spline spline = BuildFlatRandomSpline();
+        spline.SetTangentMode(TangentMode.AutoSmooth);
+        spline.Closed = false;
 
-        TryDestroyOldChunk();
+        splineContainer.Spline = spline;
+        generatedLength = spline.GetLength();
 
-        // Keep spawning until we have enough chunks ahead
-        while (activeChunks.Count < maxActiveChunks) {
-            SpawnNextChunk();
-        }
+        ConfigureExtrude();
+        splineExtrude.Rebuild();
     }
 
     /// <summary>
-    /// Destroys the oldest chunk in the queue if the player has passed it
-    /// by more than <c>destroyBehindDistance</c> units.
+    /// Returns the actual position on the generated spline at normalized t [0, 1].
     /// </summary>
-    private void TryDestroyOldChunk() {
-        if (activeChunks.Count == 0) return;
+    public Vector3 GetPositionAt(float t) {
+        if (!HasValidSpline()) return transform.position;
 
-        ProceduralSplineGenerator oldest = activeChunks.Peek();
-        float chunkEndZ = oldest.transform.position.z + oldest.chunkLength;
-
-        if (player.position.z - chunkEndZ > destroyBehindDistance) {
-            activeChunks.Dequeue();
-            Destroy(oldest.gameObject);
-        }
+        SplineUtility.Evaluate(splineContainer.Spline, Mathf.Clamp01(t), out float3 position, out _, out _);
+        return transform.TransformPoint((Vector3)position);
     }
 
     /// <summary>
-    /// Instantiates a new chunk prefab, configures it with the shared shape settings,
-    /// generates its spline connected to the previous chunk, and enqueues it.
+    /// Returns the actual tangent direction on the generated spline at normalized t [0, 1].
     /// </summary>
-    private void SpawnNextChunk() {
-        ProceduralSplineGenerator newChunk = Instantiate(chunkPrefab);
+    public Vector3 GetTangentAt(float t) {
+        if (!HasValidSpline()) return transform.forward;
 
-        // Configure the chunk with the settings configured in TrackManager
-        newChunk.Configure(knotCount, knotSpacing, maxLateralOffset);
+        SplineUtility.Evaluate(splineContainer.Spline, Mathf.Clamp01(t), out _, out float3 tangent, out _);
+        return transform.TransformDirection((Vector3)tangent).normalized;
+    }
 
-        // Pass start position and the incoming direction for a smooth junction
-        newChunk.Generate(nextChunkStartPos, nextChunkDirection);
+    /// <summary>
+    /// Generate the Spline with curves using the parameters in the config
+    /// </summary>
+    /// <returns>Spline created</returns>
+    private Spline BuildFlatRandomSpline() {
+        Spline spline = new Spline();
+        int knotCount = Mathf.Max(2, Mathf.CeilToInt(trackLength / knotSpacing) + 1);
+        float currentX = 0f;
 
-        // Store values for the next chunk
-        nextChunkStartPos = newChunk.lastKnotWorldPosition;
-        nextChunkDirection = newChunk.lastTangentDirection;
+        for (int i = 0; i < knotCount; i++) {
+            float z = Mathf.Min(i * knotSpacing, trackLength);
 
-        activeChunks.Enqueue(newChunk);
+            if (i == 0) {
+                currentX = 0f;
+            } else {
+                float lateralStep = UnityEngine.Random.Range(-maxLateralStep, maxLateralStep);
+                currentX = Mathf.Clamp(currentX + lateralStep, -maxLateralOffset, maxLateralOffset);
+            }
+
+            spline.Add(new BezierKnot(new float3(currentX, 0f, z)));
+        }
+
+        return spline;
+    }
+
+    /// <summary>
+    /// Configures the Splines Extrude used to generate the mesh
+    /// </summary>
+    private void ConfigureExtrude() {
+        if (splineContainer == null || splineExtrude == null) return;
+
+        splineExtrude.Container = splineContainer;
+        splineExtrude.Radius = roadWidth / RoadProfileWidthMultiplier;
+        splineExtrude.SegmentsPerUnit = segmentsPerUnit;
+        splineExtrude.Capped = true;
+        splineExtrude.Range = new Vector2(0f, 1f);
+    }
+
+    private bool HasValidSpline() {
+        return splineContainer != null && splineContainer.Spline != null && splineContainer.Spline.Count >= 2;
     }
 }
