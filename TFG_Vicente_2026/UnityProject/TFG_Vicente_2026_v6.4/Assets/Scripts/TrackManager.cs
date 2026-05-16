@@ -1,3 +1,4 @@
+using System;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Splines;
@@ -39,10 +40,21 @@ public class TrackManager : MonoBehaviour {
     private SplineContainer splineContainer;
     private SplineExtrude splineExtrude;
     private float generatedLength;
+    private bool isReady;
 
-    // Check if it's the final of the Spline on other classes 
+    // Event fired when the Spline is created to start Spline Animate Track Followers movement (Player and Enemies).
+    public event Action<TrackManager> OnTrackGenerated;
+
+    // Make public variables from Spline to control Player and Enemies
+    public SplineContainer Container => splineContainer;
+    public float RoadWidth => roadWidth;
+    public float HalfRoadWidth => roadWidth * 0.5f;
     public float TrackLength => generatedLength;
+    public bool IsReady => isReady;
 
+    /// <summary>
+    /// Get the components needed by the Spline.
+    /// </summary>
     private void InitComponents(){
         splineContainer = GetComponent<SplineContainer>();
         splineExtrude = GetComponent<SplineExtrude>();
@@ -58,9 +70,12 @@ public class TrackManager : MonoBehaviour {
     }
 
     /// <summary>
-    /// Build the Spline and extrude it using Spline Extrude
+    /// Build the Spline and extrude it using Spline Extrude.
+    /// Added a flag to check if the Spline it's created before start the player movement
     /// </summary>
     public void GenerateTrack() {
+        isReady = false;
+
         Spline spline = BuildFlatRandomSpline();
         spline.SetTangentMode(TangentMode.AutoSmooth);
         spline.Closed = false;
@@ -70,6 +85,9 @@ public class TrackManager : MonoBehaviour {
 
         ConfigureExtrude();
         splineExtrude.Rebuild();
+
+        isReady = true;
+        OnTrackGenerated?.Invoke(this);
     }
 
     /// <summary>
@@ -78,8 +96,7 @@ public class TrackManager : MonoBehaviour {
     public Vector3 GetPositionAt(float t) {
         if (!HasValidSpline()) return transform.position;
 
-        SplineUtility.Evaluate(splineContainer.Spline, Mathf.Clamp01(t), out float3 position, out _, out _);
-        return transform.TransformPoint((Vector3)position);
+        return EvaluatePose(t, 0f).position;
     }
 
     /// <summary>
@@ -88,8 +105,50 @@ public class TrackManager : MonoBehaviour {
     public Vector3 GetTangentAt(float t) {
         if (!HasValidSpline()) return transform.forward;
 
-        SplineUtility.Evaluate(splineContainer.Spline, Mathf.Clamp01(t), out _, out float3 tangent, out _);
-        return transform.TransformDirection((Vector3)tangent).normalized;
+        return EvaluatePose(t, 0f).tangent;
+    }
+
+    /// <summary>
+    /// Most important function on the code. Evaluates the Spline for a specific moment (t) and lateral offset, and return the TrackPose of this moment.
+    /// This is because, the Spline has a mesh and it's wider than the Spline itself.
+    /// </summary>
+    /// <param name="t">The exact point of the Spline that has to be evaluated</param>
+    /// <param name="lateralOffset">The lateral position to evaluate in the Spline</param>
+    /// <param name="edgeMargin">Margin of the edge to avoid compare on the Spline outbounds</param>
+    /// <returns>TrackPose structure with all the information about that specific moment and offset</returns>
+    public TrackPose EvaluatePose(float t, float lateralOffset, float edgeMargin = 0f) {
+        if (!HasValidSpline()) {
+            return new TrackPose(
+                transform.position,
+                transform.rotation,
+                transform.forward,
+                transform.right,
+                transform.up
+            );
+        }
+
+        float clampedT = Mathf.Clamp01(t);
+        float maxOffset = Mathf.Max(0f, HalfRoadWidth - Mathf.Max(0f, edgeMargin));
+        float clampedLateralOffset = Mathf.Clamp(lateralOffset, -maxOffset, maxOffset);
+
+        SplineUtility.Evaluate(splineContainer.Spline, clampedT, out float3 localPosition, out float3 localTangent, out float3 localUp);
+
+        Vector3 tangent = transform.TransformDirection((Vector3)localTangent).normalized;
+        if (tangent.sqrMagnitude <= Mathf.Epsilon)
+            tangent = transform.forward;
+
+        Vector3 up = transform.TransformDirection((Vector3)localUp).normalized;
+        if (up.sqrMagnitude <= Mathf.Epsilon)
+            up = Vector3.up;
+
+        Vector3 right = Vector3.Cross(up, tangent).normalized;
+        if (right.sqrMagnitude <= Mathf.Epsilon)
+            right = transform.right;
+
+        Vector3 position = transform.TransformPoint((Vector3)localPosition) + right * clampedLateralOffset;
+        Quaternion rotation = Quaternion.LookRotation(tangent, up);
+
+        return new TrackPose(position, rotation, tangent, right, up);
     }
 
     /// <summary>
