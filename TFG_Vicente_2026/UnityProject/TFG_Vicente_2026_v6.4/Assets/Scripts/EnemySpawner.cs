@@ -53,6 +53,11 @@ public class EnemySpawner : MonoBehaviour {
         SpawnEnemies();
     }
 
+    /// <summary>
+    /// Check if the spline it's generated
+    /// If it's generated, delete the previous enemies, calculates the position in the (t) of spline and the lateral position for each enemy to generate
+    /// Calculates if the enemy has to be static or movingEnemy, and create the corresponding Enemy
+    /// </summary>
     public void SpawnEnemies() {
         if (track == null || !track.IsReady) return;
 
